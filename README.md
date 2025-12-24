@@ -30,8 +30,8 @@ chmod +x magnum.sh
 
 ### 3) Test
 ```bash
-./magnum.sh --version
 ./magnum.sh --help
+./magnum.sh --version
 ```
 
 ---
@@ -40,32 +40,32 @@ chmod +x magnum.sh
 
 ### Watch mode (rescan every 3 minutes)
 ```bash
-./magnum.sh 10.10.10.172 3 --iface utun4 --outdir "$(pwd)"
+sudo -E ./magnum.sh 10.10.10.172 3 --iface utun4 --outdir "$(pwd)"
 ```
 
-### Run only ONE cycle
+### Run only ONE cycle (baseline then exit)
 ```bash
-./magnum.sh 10.10.10.172 3 --iface utun4 --outdir "$(pwd)" --once
+sudo -E ./magnum.sh 10.10.10.172 3 --iface utun4 --outdir "$(pwd)" --once
 ```
 
-### Disable deep scans on NEW tcp ports
+### Disable deep scans on NEW TCP ports
 ```bash
-./magnum.sh 10.10.10.172 3 --iface utun4 --outdir "$(pwd)" --no-deep
+sudo -E ./magnum.sh 10.10.10.172 3 --iface utun4 --outdir "$(pwd)" --no-deep
 ```
 
-### Disable UDP selective
+### Disable UDP selective baseline
 ```bash
-./magnum.sh 10.10.10.172 3 --iface utun4 --outdir "$(pwd)" --no-udp
+sudo -E ./magnum.sh 10.10.10.172 3 --iface utun4 --outdir "$(pwd)" --no-udp
 ```
 
-### Force router ip (if auto-detect fails)
+### Force router IP (if auto-detect fails)
 ```bash
-./magnum.sh 10.10.10.172 3 --iface utun4 --router-ip 10.10.14.1 --outdir "$(pwd)"
+sudo -E ./magnum.sh 10.10.10.172 3 --iface utun4 --router-ip 10.10.14.1 --outdir "$(pwd)"
 ```
 
 ### Produce Nmap outputs as -oA (.nmap + .xml + .gnmap)
 ```bash
-./magnum.sh 10.10.10.172 3 --iface utun4 --outdir "$(pwd)" --nmap-all
+sudo -E ./magnum.sh 10.10.10.172 3 --iface utun4 --outdir "$(pwd)" --nmap-all
 ```
 
 ---
@@ -75,23 +75,25 @@ chmod +x magnum.sh
 ### Baseline (first run only)
 - Full TCP discovery via `masscan` (0–65535)
 - Full TCP service scan via `nmap -sS -sC -sV` on discovered ports (saved as `.nmap`)
-- Smart Auto Service Packs per baseline port (service+port fallback):
-  - HTTP/HTTPS, SMB, LDAP/LDAPS, RDP, WinRM, DNS, FTP, SMTP, MSSQL, MySQL, Postgres, SSH
+- **Baseline service packs** (known services only) generated from the baseline nmap output:
+  - `http, smb, ldap, winrm, dns, ftp, ssh, smtp`
+  - If a baseline port/service is not recognized, no pack is generated for it.
 - Optional UDP selective baseline: `nmap -sU --top-ports 50 --open` (if UDP enabled)
 
 ### Watch loop
-- Re-runs masscan each interval
-- If TCP port-set changed: runs a new full TCP report
+- Re-runs masscan each interval (or when manually triggered)
+- If TCP port-set changed: runs a new full TCP change report
 - If a NEW port vs baseline appears:
   - Beep + macOS notification
   - Deep scan on the new port only (saved under `nmap/new_ports/`)
-  - Extra HTTP scan if port looks web-ish (80/443/8080/8000/8443/8888)
+  - Extra HTTP scan if port looks web-ish (80/443/8000/8080/8081/8443/8888)
   - Service pack scan (service+port fallback)
 
 ---
 
 ## Output structure
 All outputs go under your current directory (or `--outdir`) like:
+
 ```
 ./scans/<TARGET>/
   masscan/
@@ -102,32 +104,42 @@ All outputs go under your current directory (or `--outdir`) like:
     nmap_baseline_tcp_<TS>.nmap
     nmap_change_tcp_<TS>.nmap
     nmap_baseline_udp_<TS>.nmap            (if UDP enabled)
-    nmap_change_udp_<TS>.nmap              (if UDP watch enabled)
 
     baseline_packs/
-      nmap_<service>_pack_baseline_tcp_<TS>_p<PORT>.nmap
+      nmap_<pack>_pack_baseline_tcp_<TS>_p<PORT>.nmap
 
     new_ports/
       nmap_deep_tcp_<TS>_p<PORT>.nmap
-      nmap_http_tcp_<TS>_p<PORT>.nmap      (only for web ports)
-      nmap_<service>_pack_new_tcp_<TS>_p<PORT>.nmap
+      nmap_http_tcp_<TS>_p<PORT>.nmap      (only for web-ish ports)
+      nmap_<pack>_pack_new_tcp_<TS>_p<PORT>.nmap
 
   logs/
-    baseline_tcp_ports.txt
-    last_tcp_set.txt
-    seen_new_tcp_ports.txt
-    alerts_new_tcp_ports.txt
+    baseline_tcp_ports.csv
+    baseline_tcp_ports.lines
+    last_tcp_set.lines
+
     baseline_packs_index.txt
     new_ports_index.txt
-    baseline_udp_ports.txt                 (if UDP enabled)
-    last_udp_set.txt                       (if UDP enabled)
+
+    masscan_baseline_<TS>.log
+    masscan_rescan_<TS>.log
+
+    nmap_baseline_tcp_<TS>.log
+    nmap_change_tcp_<TS>.log
+    nmap_baseline_udp_<TS>.log             (if UDP enabled)
+
+    nmap_deep_tcp_<TS>_p<PORT>.log
+    nmap_<pack>_pack_baseline_tcp_<TS>_p<PORT>.log
+    nmap_<pack>_pack_new_tcp_<TS>_p<PORT>.log
 ```
+
+> Note: `baseline_packs/` may be empty if the baseline scan doesn't include any recognized services at that moment.
 
 ---
 
 ## Handy controls
 - Press **ENTER** to force a rescan immediately
-- Or:
+- Or create the trigger file under your `--outdir` root:
   ```bash
   touch ./trigger_rescan
   ```
@@ -146,16 +158,16 @@ nmap -Pn -sC -sV <target>
 ```
 
 ### 2) “You requested a scan type which requires root privileges”
-`nmap -sS` needs root. Magnum will call `sudo nmap` when needed.
+`nmap -sS` needs root. Magnum calls `sudo nmap` internally.
 If you still see this, run:
 ```bash
-sudo ./magnum.sh <target> 3 --iface utun4 --outdir "$(pwd)"
+sudo -E ./magnum.sh <target> 3 --iface utun4 --outdir "$(pwd)"
 ```
 
 ### 3) ROUTER_IP auto-detect fails for utun4
 Fix by forcing it:
 ```bash
-./magnum.sh <target> 3 --iface utun4 --router-ip 10.10.14.1 --outdir "$(pwd)"
+sudo -E ./magnum.sh <target> 3 --iface utun4 --router-ip 10.10.14.1 --outdir "$(pwd)"
 ```
 
 To see your current VPN gateway quickly (typical HTB is `10.10.14.1`):
@@ -163,25 +175,19 @@ To see your current VPN gateway quickly (typical HTB is `10.10.14.1`):
 route -n get 10.10.10.10 | grep gateway
 ```
 
-### 4) Masscan shows ports but Nmap shows nothing
-Nmap might think host is down unless `-Pn` is used, or the host is rate-limiting.
-- Keep `-Pn` ON (default)
-- Try a slower interval / lower rate
+### 4) Current rescan shows “Current TCP ports: -”
+This means masscan rescan didn’t report any open ports (packet loss / rate limiting / transient target behavior).
+Check the rescan log:
+```bash
+less "./scans/<TARGET>/logs/masscan_rescan_<TS>.log"
+```
+Try lowering rate, increasing wait, or just rescan again.
 
 ### 5) Why do ports change between rescans?
 This can happen in HTB/THM/OSCP labs because:
 - Service starts/stops (crashes, restarts, or is triggered by your actions)
 - NAT / VPN jitter and packet loss
 - Rate limiting / IDS drops some probes
-- Load balancers or port-knocking-like behavior (rare but possible)
-
----
-
-## FAQ (HTB/THM/OSCP) — “Different open ports on rescan?”
-Yes, it can happen. Best practice:
-- Run a slower confirmation scan when results matter.
-- Use `-Pn` in restricted environments.
-- Compare multiple scans; treat Masscan as “discovery hint” and Nmap as “confirmation”.
 
 ---
 
