@@ -1,0 +1,17 @@
+# outputs
+scans/
+trigger_rescan
+
+# common scan artifacts if produced
+*.nmap
+*.xml
+*.gnmap
+*.txt
+*.log
+
+# macOS
+.DS_Store
+
+# editors
+.vscode/
+.idea/
